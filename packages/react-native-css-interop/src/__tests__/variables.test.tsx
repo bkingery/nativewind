@@ -1,8 +1,10 @@
 /** @jsxImportSource test */
-import { memo, useEffect } from "react";
+import { memo, StrictMode, useEffect } from "react";
 import { View, ViewProps } from "react-native";
 
 import {
+  act,
+  colorScheme,
   cssInterop,
   registerCSS,
   render,
@@ -214,4 +216,76 @@ test("useUnsafeVariable", () => {
   render(<Component />);
 
   expect(myVar).toEqual("red");
+});
+
+test("useUnstableNativeVariable follows the color scheme and releases its subscriptions", () => {
+  registerCSS(`
+    :root { --my-var: white; }
+    @media (prefers-color-scheme: dark) {
+      :root { --my-var: black; }
+    }
+    .test { color: var(--my-var); }
+  `);
+
+  const getColorScheme = jest.spyOn(colorScheme, "get");
+  let myVar;
+
+  const Component = () => {
+    myVar = useUnstableNativeVariable("--my-var");
+    return null;
+  };
+
+  render(<Component />);
+
+  const { dependencies } = getColorScheme.mock.calls.find(
+    ([effect]) => effect,
+  )![0]!;
+
+  for (const [scheme, expected] of [
+    ["dark", "black"],
+    ["light", "white"],
+    ["dark", "black"],
+    ["light", "white"],
+  ] as const) {
+    act(() => colorScheme.set(scheme));
+    expect(myVar).toEqual(expected);
+    const subscriptions = dependencies.size;
+
+    screen.rerender(<Component />);
+    expect(myVar).toEqual(expected);
+    expect(dependencies.size).toEqual(subscriptions);
+  }
+
+  screen.unmount();
+
+  expect(dependencies.size).toEqual(0);
+});
+
+test("useUnstableNativeVariable follows the color scheme in StrictMode", () => {
+  registerCSS(`
+    :root { --my-var: white; }
+    @media (prefers-color-scheme: dark) {
+      :root { --my-var: black; }
+    }
+    .test { color: var(--my-var); }
+  `);
+
+  let myVar;
+
+  const Component = () => {
+    myVar = useUnstableNativeVariable("--my-var");
+    return null;
+  };
+
+  render(
+    <StrictMode>
+      <Component />
+    </StrictMode>,
+  );
+
+  act(() => colorScheme.set("dark"));
+  expect(myVar).toEqual("black");
+
+  act(() => colorScheme.set("light"));
+  expect(myVar).toEqual("white");
 });

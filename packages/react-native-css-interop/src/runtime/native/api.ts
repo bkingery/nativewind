@@ -1,4 +1,11 @@
-import { createElement, forwardRef, useContext, useState } from "react";
+import {
+  createElement,
+  forwardRef,
+  useCallback,
+  useContext,
+  useState,
+  useSyncExternalStore,
+} from "react";
 
 import {
   assignToTarget,
@@ -16,7 +23,12 @@ import { getNormalizeConfig } from "../config";
 import { cleanupEffect, Effect } from "../observable";
 import { colorScheme } from "./appearance-observables";
 import { interop } from "./native-interop";
-import { getVariable, opaqueStyles, VariableContext } from "./styles";
+import {
+  getVariable,
+  opaqueStyles,
+  VariableContext,
+  VariableContextValue,
+} from "./styles";
 import { getComponentType } from "./unwrap-components";
 
 export { StyleSheet } from "./stylesheet";
@@ -135,19 +147,37 @@ export function vars(variables: Record<string, RuntimeValueDescriptor>) {
 export const useUnstableNativeVariable = (name: string) => {
   const context = useContext(VariableContext);
 
-  const [effect, setState] = useState<Effect>(() => ({
-    run: () => setState((s) => ({ ...s })),
-    dependencies: new Set(),
-  }));
+  const subscribe = useCallback(
+    (onChange: () => void) => {
+      const effect: Effect = {
+        run() {
+          // The value may now come from different observables (e.g. light -> dark)
+          cleanupEffect(effect);
+          readVariable(name, context, effect);
+          onChange();
+        },
+        dependencies: new Set(),
+      };
+      readVariable(name, context, effect);
+      return () => cleanupEffect(effect);
+    },
+    [name, context],
+  );
 
+  return useSyncExternalStore(subscribe, () => readVariable(name, context));
+};
+
+function readVariable(
+  name: string,
+  context: VariableContextValue,
+  effect?: Effect,
+) {
   let value: any = getVariable(name, context, effect);
   if (typeof value === "object" && "get" in value) {
-    cleanupEffect(effect);
     value = value.get(effect);
   }
-
   return value;
-};
+}
 
 /**
  * @deprecated Please use <SafeAreaProvider /> directly
